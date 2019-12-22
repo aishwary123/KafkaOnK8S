@@ -1,0 +1,73 @@
+
+To run the bitnami image with a SASL_SSL
+
+1. Create Keystore and Truststore with (firstname,lastname) and OrganizationUnit equals to
+   the domain ( DNS of pod with headless service )
+   e.g. my-kafka-kafka-0.my-kafka-kafka-headless.default.svc.cluster.local
+   where "my-kafka-kafka-0" is your pod name.
+
+2. Once keystore and truststore is created, create secret with these files
+
+3. In values.yaml file, mark auth.enabled as true , provide all the username and password field required update the certificatesSecret and certificatePassword field
+
+4. To use kafka client, use like this 
+	kubectl exec -it $POD_NAME -- kafka-console-producer.sh --broker-list SASL_SSL://10.2.11.20:9092 --topic test --producer.config /opt/bitnami/kafka/conf/producer.properties
+
+	here, 10.2.11.20 is the IP. for your pod my-kafka-kafka-0
+
+	my-kafka-kafka.default.svc.cluster.local
+
+
+
+To run the bitnami image with a SASL_SSL without using POD_IP as advertisment address
+
+Note : You need to decide the name you are going to give to your helm deployment
+		Based upon that name you have to create keystore and truststore 
+
+		e.g. Let's say we are giving helm deployment name as my-kafka
+		So, my headless service name will be "my-kafka-kafka"
+
+		Command to execute :
+
+		// Create keystore 
+		keytool -genkey -alias my-kafka-kafka -keyalg RSA -keystore kafka.keystore.jks
+
+		// give first name and last name ( CN ) as *.my-kafka-kafka-headless
+		// it will allow access to all the pods based access like 
+		// my-kafka-kafka-0.my-kafka-kafka-headless
+
+		// Export the certificate
+		keytool -export -alias my-kafka-kafka -file my-kafka-kafka.cer -keystore kafka.keystore.jks
+
+		// Import the certificate into truststore 
+		keytool -import -v -trustcacerts -alias my-kafka-kafka -file my-kafka-kafka.cer -keystore kafka.truststore.jks
+
+		// Give the same name as the same name is used in the docker image 
+
+		// Create secret with these keystore and truststore
+		kubectl create secret generic kafka-certificates --from-file=./kafka.keystore.jks --from-file=./kafka.truststore.jks
+
+
+1.  Add these in your env variable
+		
+		- name: MY_POD_TO_HEADLESS_SERVICE_NAME
+          value: "$(MY_POD_NAME).{{ template "kafka.fullname" . }}-headless"
+
+        - name: KAFKA_ADVERTISED_LISTENERS
+          {{- if .Values.advertisedListeners }}
+          value: {{ .Values.advertisedListeners }}
+          {{- else if .Values.auth.enabled  }}# value: 
+          value: "SASL_SSL://$(MY_POD_TO_HEADLESS_SERVICE_NAME):$(KAFKA_PORT_NUMBER)"
+          {{- else }}
+          value: "PLAINTEXT://$(MY_POD_TO_HEADLESS_SERVICE_NAME):$(KAFKA_PORT_NUMBER)"
+          {{- end }}
+
+2. Check all the Username and Password are correctly set specially for zookeeper
+
+3. To call producer client ( bootstrap server can be collection of list of all nodes i.e. my-kafka-kafka-0.my-kafka-kafka-headless, my-kafka-kafka-1.my-kafka-kafka-headless ,my-kafka-kafka-2.my-kafka-kafka-headless )
+
+kubectl exec -it $POD_NAME -- kafka-console-producer.sh --broker-list SASL_SSL://my-kafka-kafka-0.my-kafka-kafka-headless:9092 --topic test --producer.config /opt/bitnami/kafka/conf/producer.properties
+
+4. To call consumer client ( bootstrap server can be collection of list of all nodes i.e. my-kafka-kafka-0.my-kafka-kafka-headless, my-kafka-kafka-1.my-kafka-kafka-headless ,my-kafka-kafka-2.my-kafka-kafka-headless )
+
+kubectl exec -it $POD_NAME -- kafka-console-consumer.sh --bootstrap-server SASL_SSL://my-kafka-kafka-2.my-kafka-kafka-headless:9092 --topic test --consumer.config /opt/bitnami/kafka/conf/consumer.properties
